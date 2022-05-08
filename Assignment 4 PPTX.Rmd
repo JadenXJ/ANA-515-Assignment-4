@@ -1,0 +1,315 @@
+---
+title: "Assignment 4: Recomendation Systems"
+author: "Jaden Jefferson"
+date: "5/7/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Recomendation System Project
+
+This project is practice to build a simple recommendation list focused on ITEM based collaborative recommendation system. The project can be found here, https://data-flair.training/blogs/data-science-r-movie-recommendation/ 
+
+(2)The dataset can be found here, https://drive.google.com/file/d/1Dn1BZD3YxgBQJSIjbfNnmCFlDW2jdQGD/view
+
+## Business Goal (1)
+
+Building a recommendation system is the best way to keep a customer on a platform.The goal is to predict what USER 1 would like. 
+
+With collaborative recommendation we may understand USER 1 and USER 2 are very similar what they view in the past and like, so if USER 2 liked something then USER 1 likely would too. This can go vice versa.
+
+## Required Libraries
+Downloading the necessary libraries
+
+```{r, echo=TRUE, warning=FALSE}
+library(recommenderlab)
+library(ggplot2)                      
+library(data.table)
+library(reshape2)
+```
+
+## Importing Dataset (3)
+
+```{r, echo=TRUE, warning=FALSE}
+setwd("C:\\Users\\Owner\\Documents\\Documents\\ANA515\\Assignment\\IMDB-Dataset")
+movie_data <- read.csv("movies.csv",stringsAsFactors = FALSE)
+rating_data <- read.csv("ratings.csv")
+str(movie_data)
+```
+I used read.csv because it is faster. Had to change the directory using setwd() first to shorten the string in the unpackaging process.Made to data frames movie data and reading data. Changed movie_data to string because of the titles.
+
+## Dataset Description for Movies (4)
+```{r, echo=TRUE, warning=FALSE}
+summary (movie_data)
+```
+There are `r nrow(movie_data)` rows and `r ncol(movie_data)` columns in the movie dataset. The columns in movie data are named movie id, title and genre.
+
+## Dataset Description for Ratings (4)
+```{r, echo=TRUE}
+summary (rating_data)
+```
+
+There are `r nrow(rating_data)` rows and `r ncol(rating_data)` columns in the rating dataset. The columns in ratings are userid, movieid, rating, and timestamp.
+
+## Data Pre-processing/Cleaning (5)
+
+These steps are necessary to allow the recommendation system to function. The data lacks missing values luckily.
+
+1. It is necessary to convert genres into an understable format by creating a matrix of films and genres
+2. Creating a search matrix to help perform a search of films by specifying the genre
+3. Convert the matrix to a sparse matrix. This allows recommendations comprehend everything for our recommendation system
+
+## Data Pre-Processing Code Step 1 (5)
+```{r, echo=TRUE}
+movie_genre <- as.data.frame(movie_data$genres, stringsAsFactors=FALSE)
+library(data.table)
+movie_genre2 <- as.data.frame(tstrsplit(movie_genre[,1], '[|]', 
+                                   type.convert=TRUE), 
+                         stringsAsFactors=FALSE)
+colnames(movie_genre2) <- c(1:10)
+
+list_genre <- c("Action", "Adventure", "Animation", "Children", 
+                "Comedy", "Crime","Documentary", "Drama", "Fantasy",
+                "Film-Noir", "Horror", "Musical", "Mystery","Romance",
+                "Sci-Fi", "Thriller", "War", "Western")
+genre_mat1 <- matrix(0,10330,18)
+genre_mat1[1,] <- list_genre
+colnames(genre_mat1) <- list_genre
+
+for (index in 1:nrow(movie_genre2)) {
+  for (col in 1:ncol(movie_genre2)) {
+    gen_col = which(genre_mat1[1,] == movie_genre2[index,col])
+    genre_mat1[index+1,gen_col] <- 1
+}
+}
+genre_mat2 <- as.data.frame(genre_mat1[-1,], stringsAsFactors=FALSE) #remove first row, which was the genre list
+for (col in 1:ncol(genre_mat2)) {
+  genre_mat2[,col] <- as.integer(genre_mat2[,col]) #convert from characters to integers
+} 
+str(genre_mat2)
+```
+## Data Pre-Processing Code Step 1: Explained (5)
+Basically to convert to a matrix we needed to isolate the genres from the movie_data dataframe. Placing that in its own separate dataframe allows us to then split the genres from each other and turn it into a list.
+
+From there we make the matrix to map the genres from the list with the movie ids. For each it gets a yes or no (or a 0 or 1)
+
+## Data Pre-Processing Step 2 (5)
+
+```{r, echo=TRUE}
+SearchMatrix <- cbind(movie_data[,1:2], genre_mat2[])
+head(SearchMatrix)
+```
+
+This allows us to bind our previous results to our movie data.
+
+## Data Pre-Processing Step 3 (5)
+```{r, echo=TRUE, results='hide'}
+ratingMatrix <- dcast(rating_data, userId~movieId, value.var = "rating", na.rm=FALSE)
+ratingMatrix <- as.matrix(ratingMatrix[,-1]) #remove userIds
+
+#Convert rating matrix into a recommenderlab sparse matrix
+
+ratingMatrix <- as(ratingMatrix, "realRatingMatrix")
+ratingMatrix
+```
+
+## Data Pre-Processing Step 4 (5)
+
+We start the recommendation model using the recommenderRegistry to pull from our rating matrix
+
+```{r, echo=TRUE, results='hold'}
+recommendation_model <- recommenderRegistry$get_entries(dataType = "realRatingMatrix")
+names(recommendation_model)
+
+lapply(recommendation_model, "[[", "description")
+```
+
+## Data Exploration (8)
+```{r, echo=TRUE, fig.cap= "This code allows us to see the similarities between users "}
+similarity_mat <- similarity(ratingMatrix[1:4, ],
+                               method = "cosine",
+                               which = "users")
+as.matrix(similarity_mat)
+
+image(as.matrix(similarity_mat), main = "User's Similarities")
+```
+
+## Data Exploration (8)
+
+```{r, echo=TRUE}
+rating_values <- as.vector(ratingMatrix@data)
+unique(rating_values) # extracting unique ratings
+
+Table_of_Ratings <- table(rating_values) # creating a count of movie ratings
+Table_of_Ratings
+
+```
+
+We need to create a rating values to make a table. This way we will be able to notice the breakdown of movie popularity. Notice that there is an absurd amount of 0 ratings. It will filtered out later that later.
+
+## Visualizations: Movie Popularity (8)
+
+Similar to last chunk we can figure out the popularity of a movie in a table. we do that by creating a dataframe of movie views from the count of views for each movie in our rating matrix. Then create the a dataframe of views that will be sorted by decreasing order.
+
+```{r, echo=TRUE}
+library(ggplot2)
+movie_views <- colCounts(ratingMatrix) # count views for each movie
+table_views <- data.frame(movie = names(movie_views),
+                          views = movie_views) # create dataframe of views
+table_views <- table_views[order(table_views$views,
+                                 decreasing = TRUE), ] # sort by number of views
+table_views$title <- NA
+for (index in 1:10325){
+  table_views[index,3] <- as.character(subset(movie_data,
+                                         movie_data$movieId == table_views[index,1])$title)
+}
+table_views[1:6,]
+```
+
+
+## Visualizations: Movie Popularity Part 2 (8)
+```{r, echo=TRUE}
+ggplot(table_views[1:6, ], aes(x = title, y = views)) +
+  geom_bar(stat="identity", fill = 'steelblue') +
+  geom_text(aes(label=views), vjust=-0.3, size=3.5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+
+  ggtitle("Total Views of the Top Films")
+```
+
+This creates a bar graph of the top popular views for each individual title. It is not really beneficial in my opinion. You can note position placements from the descending table just as fast after all.
+
+##Visualizations: Ratings (8)
+```{r, echo=TRUE}
+image(ratingMatrix[1:20, 1:25], axes = FALSE, main = "Heatmap of the first 25 rows and 25 columns")
+```
+
+This is a heat map that shows the first 25 rows and 25 columns of movie ratings.Also no real usage. IT would have been interesting to potentially overlap Users ratings for the top movies. Maybe Pulp Fiction was the most viewed but maybe not the highest rated, etc.
+
+##Data Preparation (5)
+For this part we want to find useful data, normalize, and binarize it. 
+
+1. First is selecting 50 as minimum number of users who rated a film and minimum number that viewed a film. This will act like a filter to discard the least watched films or not relevant users. Then we can plot a heat map that visualizes the the top users and movies.
+
+2. There can be a bias due to the variance of high and low ratings for all the watched films by individual users. Normalizing it will take it away and change the average value of ratings column to 0. Then we can plot a heat map that visualized the normalized ratings.
+
+3. Binarizing the data makes our values either 1 or 0 making the system more efficient. 1 equals a rating above 3 and 0 otherwise.
+
+##Data Perparation First Step (5)
+```{r, echo=TRUE}
+movie_ratings <- ratingMatrix[rowCounts(ratingMatrix) > 50,
+                             colCounts(ratingMatrix) > 50]
+movie_ratings
+
+minimum_movies<- quantile(rowCounts(movie_ratings), 0.98)
+minimum_users <- quantile(colCounts(movie_ratings), 0.98)
+image(movie_ratings[rowCounts(movie_ratings) > minimum_movies,
+                     colCounts(movie_ratings) > minimum_users],
+main = "Heatmap of the top users and movies")
+```
+
+This provides us with people who actual watch and rate movies. It would be terrible to include people who aren't really insightful. Also it will not include the least watched films. This is important if we want to make a top recommendation system with only 'X' amount of space available.
+
+## Data Preparation Second Step (5)
+```{r, echo=TRUE}
+normalized_ratings <- normalize(movie_ratings)
+sum(rowMeans(normalized_ratings) > 0.00001)
+
+image(normalized_ratings[rowCounts(normalized_ratings) > minimum_movies,
+                          colCounts(normalized_ratings) > minimum_users],
+main = "Normalized Ratings of the Top Users")
+```
+
+This normalizes the movie ratings by using normalize() function. 
+
+## Data Preparation third Step (5)
+```{r, echo=TRUE}
+binary_minimum_movies <- quantile(rowCounts(movie_ratings), 0.95)
+binary_minimum_users <- quantile(colCounts(movie_ratings), 0.95)
+#movies_watched <- binarize(movie_ratings, minRating = 1)
+
+good_rated_films <- binarize(movie_ratings, minRating = 3)
+image(good_rated_films[rowCounts(movie_ratings) > binary_minimum_movies,
+colCounts(movie_ratings) > binary_minimum_users],
+main = "Heatmap of the top users and movies")
+```
+
+
+## Making the Collaborative Filter
+For this projects the collaborative filter is looking for similarity of the items based on people's rating. The filtering system will be split into a training set (80% of data) and a test set (20% of data)
+
+## Collaborative Filtering System
+```{r, echo=TRUE}
+sampled_data<- sample(x = c(TRUE, FALSE),
+                      size = nrow(movie_ratings),
+                      replace = TRUE,
+                      prob = c(0.8, 0.2))
+training_data <- movie_ratings[sampled_data, ]
+testing_data <- movie_ratings
+```
+
+## Recommendation System Explained
+
+In the recommendation model there are parameters. K denotes the number of items for computing their similarities. In this project it is 30. The model method will be item based collaboration filtering (IBCF) and the data we are using is the trainding data.
+
+##Recommendation System Code
+```{r, echo=TRUE}
+recommendation_system <- recommenderRegistry$get_entries(dataType ="realRatingMatrix")
+recommendation_system$IBCF_realRatingMatrix$parameters
+
+recommen_model <- Recommender(data = training_data,
+                          method = "IBCF",
+                          parameter = list(k = 30))
+recommen_model
+class(recommen_model)
+```
+
+## Model
+After retrieveing the model with getModel() function, the class and dimensions of our similarity matrix that is contained with model_info. Then generate a heat map, that contain the top 20 items and visualize the similarity shared between them.
+
+## Model Continued
+```{r, echo=TRUE}
+model_info <- getModel(recommen_model)
+class(model_info$sim)
+dim(model_info$sim)
+top_items <- 20
+image(model_info$sim[1:top_items, 1:top_items],
+   main = "Heatmap of the first rows and columns")
+```
+-This shows that some films are very similar to each other by their shade.
+
+## Building the Top Recommendations System
+In this step, a top_recommendation variable that will be initialized to 10 fillms for each user. the predict function will identify similar items and will rank them. The rating is used as a weight in the ranking with each multiplied with related similarities and finally everything is added in the end.
+
+## Building the Top Recommendations System Part 2
+```{r, echo=TRUE}
+top_recommendations <- 10 # the number of items to recommend to each user
+predicted_recommendations <- predict(object = recommen_model,
+                          newdata = testing_data,
+                          n = top_recommendations)
+predicted_recommendations
+```
+## Building the Top Recommendations System Part 3
+```{r, echo=TRUE}
+user1 <- predicted_recommendations@items[[1]] # recommendation for the first user
+movies_user1 <- predicted_recommendations@itemLabels[user1]
+movies_user2 <- movies_user1
+for (index in 1:10){
+  movies_user2[index] <- as.character(subset(movie_data,
+                                         movie_data$movieId == movies_user1[index])$title)
+}
+movies_user2
+```
+This code completes the idea that "User 1 = User 2" pretty much.
+
+## Building the Top Recommendations System Part 4 (7)
+```{r, echo=TRUE}
+recommendation_matrix <- sapply(predicted_recommendations@items,
+                      function(x){ as.integer(colnames(movie_ratings)[x]) }) # matrix with the recommendations for each user
+#dim(recc_matrix)
+recommendation_matrix[,1:4]
+```
+Here is the matrix of the Recommendation system. It shows the top 10 movie IDs for four users so looks like it is working right. It would be better if the movieID could be the name in this, however, when the actual system is implemented in the business the movieID would tack on to all info to populate it on the person's recommendation list. 
